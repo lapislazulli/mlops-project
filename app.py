@@ -1,15 +1,22 @@
 import joblib
-import numpy as np
+import pandas as pd
 from fastapi import FastAPI
 from pydantic import BaseModel
 
 app = FastAPI()
-model = joblib.load("model.pkl")
-
-IRIS_CLASSES = ["setosa", "versicolor", "virginica"]
+artifact = joblib.load("model.pkl")
+model = artifact["model"]
+encoders = artifact["encoders"]
+features = artifact["features"]
 
 class PredictRequest(BaseModel):
-    features: list[float]  # expects 4 values: sepal_length, sepal_width, petal_length, petal_width
+    Platform: str
+    Genre: str
+    Publisher: str
+    NA_Sales: float
+    EU_Sales: float
+    JP_Sales: float
+    Other_Sales: float
 
 @app.get("/health")
 def health():
@@ -17,11 +24,19 @@ def health():
 
 @app.post("/predict")
 def predict(request: PredictRequest):
-    X = np.array(request.features).reshape(1, -1)
-    pred = model.predict(X)[0]
-    proba = model.predict_proba(X)[0].tolist()
+    data = request.model_dump()
+    for col in ["Platform", "Genre", "Publisher"]:
+        le = encoders[col]
+        val = data[col]
+        if val not in le.classes_:
+            return {"error": f"Unknown {col}: {val}"}
+        data[col] = le.transform([val])[0]
+
+    df = pd.DataFrame([data])[features]
+    pred = model.predict(df)[0]
+    proba = model.predict_proba(df)[0].tolist()
     return {
         "prediction": int(pred),
-        "class": IRIS_CLASSES[pred],
-        "probabilities": proba
+        "label": "hit" if pred == 1 else "flop",
+        "confidence": round(max(proba), 4)
     }
